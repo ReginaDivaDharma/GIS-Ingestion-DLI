@@ -264,8 +264,7 @@ spark.executor.instances=1
 ### 1. Cannot Save Directly to DLI Hive Table
 Spark JAR jobs in DLI cannot connect to DLI's Hive metastore directly. The job attempts to use a local Derby database which fails with:
 ```
-Table/View 'DBS' does not exist
-Version information not found in metastore. The process will exit.
+Accessing DLI metadata from a Spark JAR job is a restricted feature that requires explicit activation by Huawei, so you need to submit a ticket to whitelist it first
 ```
 **Workaround:** Save processed data back to OBS as Parquet instead.
 
