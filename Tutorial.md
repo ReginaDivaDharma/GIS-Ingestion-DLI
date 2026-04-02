@@ -165,13 +165,11 @@ obs://YOUR-BUCKET/jobs/jar/gis-ingestion-assembly-1.0.jar
 ## Source Code
 
 ### `build.sbt`
-
-```scala for parquet
+```build
 name := "gis-ingestion"
 version := "1.0"
 scalaVersion := "2.12.15"
 
-// Target Java 8 for DLI compatibility
 javacOptions ++= Seq("-source", "1.8", "-target", "1.8")
 scalacOptions ++= Seq("-target:jvm-1.8")
 
@@ -181,8 +179,8 @@ resolvers ++= Seq(
 )
 
 libraryDependencies ++= Seq(
-  "org.apache.spark" %% "spark-sql"   % "3.3.1" % "provided",
-  "org.apache.spark" %% "spark-hive"  % "3.3.1" % "provided",
+  "org.apache.spark" %% "spark-sql" % "3.3.1" % "provided",
+  "org.apache.spark" %% "spark-hive" % "3.3.1" % "provided",
   "org.apache.sedona" %% "sedona-spark-shaded-3.0" % "1.5.1"
 )
 
@@ -192,6 +190,47 @@ assemblyMergeStrategy in assembly := {
 }
 ```
 
+### `project/plugins.sbt`
+
+```scala
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.1")
+```
+
+### `GISIngestion.scala`
+
+```scala
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+
+object GISIngestion {
+  def main(args: Array[String]): Unit = {
+    val config = SparkSession.builder()
+      .appName("GIS Sedona Ingestion")
+      .getOrCreate()
+
+    println("Step 1: Reading GIS parquet from OBS...")
+    val df = config.read.parquet("obs://dashboard-env-bucket/master_area_adm")
+    println("Step 1 complete!")
+
+    println("Step 2: Converting binary geometry to hex string...")
+    val dfConverted = df.withColumn(
+      "polygon_suburb",
+      hex(col("polygon_suburb"))
+    )
+    println("Step 2 complete!")
+
+    println("Step 3: Saving to OBS...")
+    dfConverted.write
+      .mode("overwrite")
+      .parquet("obs://denodo-bucket-telkom/cleaned_tables/master_area_adm_processed")
+
+    println("Done! GIS data successfully processed!")
+    config.stop()
+  }
+}
+```
+
+### GIS-Ingestion GeoJSON
 ```scala for GeoJSON
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
@@ -263,46 +302,52 @@ object GISIngestion {
 }
 ```
 
+### GIS-Ingestion Shapefile 
 ```scala for Shapefile (.shp)
-
-```
-
-### `project/plugins.sbt`
-
-```scala
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.1")
-```
-
-### `GISIngestion.scala`
-
-```scala
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
+import org.apache.sedona.spark.SedonaContext
 
-object GISIngestion {
+object ShapefileIngestion {
   def main(args: Array[String]): Unit = {
-    val config = SparkSession.builder()
-      .appName("GIS Sedona Ingestion")
+
+    val spark = SparkSession.builder()
+      .appName("Shapefile Sedona Ingestion")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
       .getOrCreate()
 
-    println("Step 1: Reading GIS parquet from OBS...")
-    val df = config.read.parquet("obs://dashboard-env-bucket/master_area_adm")
+    SedonaContext.create(spark)
+
+    val inputPath  = "obs://denodo-bucket-telkom/data_source/Shapefile"
+    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables/Shapefile"
+
+    // ── Step 1: Read Shapefile using Sedona ──────────────────────────────────
+    println("Step 1: Reading Shapefile from OBS...")
+    val shapefileDf = spark.read
+      .format("shapefile")
+      .load(inputPath)
+    shapefileDf.count()
     println("Step 1 complete!")
 
-    println("Step 2: Converting binary geometry to hex string...")
-    val dfConverted = df.withColumn(
-      "polygon_suburb",
-      hex(col("polygon_suburb"))
-    )
+    // ── Step 2: Convert geometry to WKT ──────────────────────────────────────
+    println("Step 2: Converting geometry to WKT...")
+    val dfWithWkt = shapefileDf
+      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
+      .drop("geometry")
+    dfWithWkt.count()
     println("Step 2 complete!")
 
-    println("Step 3: Saving to OBS...")
-    dfConverted.write
+    // ── Step 3: Save as CSV ───────────────────────────────────────────────────
+    println("Step 3: Saving to OBS as CSV...")
+    dfWithWkt
+      .write
       .mode("overwrite")
-      .parquet("obs://denodo-bucket-telkom/cleaned_tables/master_area_adm_processed")
+      .option("header", "true")
+      .csv(outputPath)
+    println("Done! Shapefile data successfully processed!")
 
-    println("Done! GIS data successfully processed!")
-    config.stop()
+    spark.stop()
   }
 }
 ```
