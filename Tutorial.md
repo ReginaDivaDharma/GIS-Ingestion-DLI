@@ -247,6 +247,10 @@ object GISIngestion {
 | | `obs://YOUR-BUCKET/jobs/geotools-wrapper/geotools-wrapper-1.5.1-28.2.jar` |
 | **Python Dependencies** | None |
 
+Please find an example of my job configuration below !
+<img width="787" height="755" alt="image" src="https://github.com/user-attachments/assets/b6a578bf-6ccc-4f1b-88be-8fa60842faed" />
+
+
 ### Spark Arguments (`--conf`)
 
 ```
