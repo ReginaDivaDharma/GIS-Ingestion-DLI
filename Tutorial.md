@@ -206,13 +206,12 @@ import org.apache.spark.sql.functions._
 
 object GISIngestion {
   def main(args: Array[String]): Unit = {
-
     val config = SparkSession.builder()
       .appName("GIS Sedona Ingestion")
       .getOrCreate()
 
     println("Step 1: Reading GIS parquet from OBS...")
-    val df = config.read.parquet("obs://denodo/GIS_data/master_area_adm")
+    val df = config.read.parquet("obs://dashboard-env-bucket/master_area_adm")
     println("Step 1 complete!")
 
     println("Step 2: Converting binary geometry to hex string...")
@@ -222,12 +221,12 @@ object GISIngestion {
     )
     println("Step 2 complete!")
 
-    println("Step 3: Saving back to OBS as processed parquet...")
+    println("Step 3: Saving to OBS...")
     dfConverted.write
       .mode("overwrite")
-      .parquet("obs://denodo/GIS_data/master_area_adm_processed")
+      .parquet("obs://denodo-bucket-telkom/cleaned_tables/master_area_adm_processed")
 
-    println("Done! GIS data successfully processed by DLI!")
+    println("Done! GIS data successfully processed!")
     config.stop()
   }
 }
