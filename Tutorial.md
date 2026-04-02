@@ -166,7 +166,7 @@ obs://YOUR-BUCKET/jobs/jar/gis-ingestion-assembly-1.0.jar
 
 ### `build.sbt`
 
-```scala
+```scala for parquet
 name := "gis-ingestion"
 version := "1.0"
 scalaVersion := "2.12.15"
@@ -190,6 +190,81 @@ assemblyMergeStrategy in assembly := {
   case PathList("META-INF", xs @ _*) => MergeStrategy.discard
   case x => MergeStrategy.first
 }
+```
+
+```scala for GeoJSON
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
+import org.apache.sedona.spark.SedonaContext
+
+object GISIngestion {
+  def main(args: Array[String]): Unit = {
+
+    val spark = SparkSession.builder()
+      .appName("GIS Sedona Ingestion")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
+      .getOrCreate()
+
+    SedonaContext.create(spark)
+
+    val inputPath  = "obs://denodo-bucket-telkom/data_source/GeoJSON/sample.json"
+    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables"
+
+    // ── Step 1: Read entire GeoJSON file as a single raw text string ──────────
+    println("Step 1: Reading GeoJSON from OBS...")
+    val rawJson = spark.sparkContext
+      .wholeTextFiles(inputPath)
+      .values
+      .first()
+
+    // ── Step 2: Parse features manually using org.json (available in Spark) ───
+    println("Step 2: Parsing features...")
+    import org.json4s._
+    import org.json4s.jackson.JsonMethods._
+    implicit val formats: DefaultFormats.type = DefaultFormats
+
+    val parsed     = parse(rawJson)
+    val features   = (parsed \ "features").children
+
+    // Extract geometry JSON string and properties JSON string per feature
+    val rows: Seq[(String, String)] = features.map { f =>
+      val geomStr  = compact(render(f \ "geometry"))
+      val propStr  = compact(render(f \ "properties"))
+      (geomStr, propStr)
+    }
+
+    import spark.implicits._
+    val featuresDf = spark.createDataset(rows).toDF("geometry_json", "properties")
+    featuresDf.count()
+    println("Step 2 complete!")
+
+    // ── Step 3: Parse geometry with Sedona ───────────────────────────────────
+    println("Step 3: Parsing geometry with Sedona...")
+    val dfWithGeom = featuresDf
+      .withColumn("geometry",     expr("ST_GeomFromGeoJSON(geometry_json)"))
+      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
+      .withColumn("geometry_hex", expr("ST_AsBinary(geometry)"))
+      .drop("geometry", "geometry_json")
+    dfWithGeom.count()
+    println("Step 3 complete!")
+
+    // ── Step 4: Save to OBS ──────────────────────────────────────────────────
+    println("Step 4: Saving to OBS...")
+    dfWithGeom
+      .write
+      .mode("overwrite")
+      .parquet(outputPath)
+    println("Done! GIS data successfully processed!")
+
+    spark.stop()
+  }
+}
+```
+
+```scala for Shapefile (.shp)
+
 ```
 
 ### `project/plugins.sbt`
