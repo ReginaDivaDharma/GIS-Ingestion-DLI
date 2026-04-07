@@ -230,6 +230,12 @@ object GISIngestion {
 }
 ```
 
+### How to ingest GeoJSON ? 
+
+```scala for GeoJSON
+
+```
+
 ### GIS-Ingestion GeoJSON
 ```scala for GeoJSON
 import org.apache.spark.sql.SparkSession
@@ -301,12 +307,23 @@ object GISIngestion {
   }
 }
 ```
+### How to ingest Shapefile ? 
+Prerequisites : A functional shapefile data will need to include minimum of these three files before you proceed, please do note that they all need to have the same filename with different extensions.
+a. feature geometry (.shp) : The data where you store your actual geometry features
+b. Index file (.shx) : Stores index of the feature geometry
+c. Attribute data (.dbf) : Stores feature attributes in a tabular format (dBASE)
 
-### GIS-Ingestion Shapefile 
-```scala for Shapefile (.shp)
+The template below will leverage on Apache sedona to read the Shapefile folder specifically we will rely on Sedona's RDD API (ShapefileReader). Sedona will auto-discover these files and sedona will automatically join these three. 
+
+The purpose of the code below is one of the example how we can do some data processing for Shapefile from the WKT format to a more readible format - for example here i put the file as CSV.
+
+Please find the code template below : 
+```scala for Shapefile template
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.sedona.spark.SedonaContext
+import org.apache.sedona.core.formatMapper.shapefileParser.ShapefileReader
+import org.apache.sedona.sql.utils.Adapter
 
 object ShapefileIngestion {
   def main(args: Array[String]): Unit = {
@@ -319,14 +336,14 @@ object ShapefileIngestion {
 
     SedonaContext.create(spark)
 
-    val inputPath  = "obs://denodo-bucket-telkom/data_source/Shapefile"
-    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables/Shapefile"
+    // ── Config ────────────────────────────────────────────────────────────────
+    val inputPath  = "obs://your-bucket/data_source/Shapefile"   // folder path
+    val outputPath = "obs://your-bucket/cleaned_tables/Shapefile"
 
-    // ── Step 1: Read Shapefile using Sedona ──────────────────────────────────
+    // ── Step 1: Read Shapefile folder (auto-joins .shp, .dbf, .shx) ──────────
     println("Step 1: Reading Shapefile from OBS...")
-    val shapefileDf = spark.read
-      .format("shapefile")
-      .load(inputPath)
+    val spatialRDD  = ShapefileReader.readToGeometryRDD(spark.sparkContext, inputPath)
+    val shapefileDf = Adapter.toDf(spatialRDD, spark)
     shapefileDf.count()
     println("Step 1 complete!")
 
@@ -340,12 +357,64 @@ object ShapefileIngestion {
 
     // ── Step 3: Save as CSV ───────────────────────────────────────────────────
     println("Step 3: Saving to OBS as CSV...")
+    dfWithWkt.write
+      .mode("overwrite")
+      .option("header", "true")
+      .csv(outputPath)
+    println("Done! Shapefile data successfully processed!")
+
+    spark.stop()
+  }
+}
+```
+
+### GIS-Ingestion Shapefile code example
+```scala for Shapefile (.shp)
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+import org.apache.sedona.spark.SedonaContext
+import org.apache.sedona.core.formatMapper.shapefileParser.ShapefileReader
+import org.apache.sedona.sql.utils.Adapter
+
+object ShapefileIngestion {
+  def main(args: Array[String]): Unit = {
+    val spark = SparkSession.builder()
+      .appName("Shapefile Sedona Ingestion")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
+      .getOrCreate()
+
+    SedonaContext.create(spark)
+
+    val inputPath  = "obs://denodo-bucket-telkom/data_source/Shapefile"
+    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables/Shapefile"
+
+    // Step 1: Read Shapefile using RDD API (no DataSource registration needed)
+    println("Step 1: Reading Shapefile from OBS...")
+    val spatialRDD = ShapefileReader.readToGeometryRDD(
+      spark.sparkContext,
+      inputPath
+    )
+    val shapefileDf = Adapter.toDf(spatialRDD, spark)
+    shapefileDf.count()
+    println("Step 1 complete!")
+
+    // Step 2: Convert geometry to WKT
+    println("Step 2: Converting geometry to WKT...")
+    val dfWithWkt = shapefileDf
+      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
+      .drop("geometry")
+    dfWithWkt.count()
+    println("Step 2 complete!")
+
+    // Step 3: Save as CSV
+    println("Step 3: Saving to OBS as CSV...")
     dfWithWkt
       .write
       .mode("overwrite")
       .option("header", "true")
       .csv(outputPath)
-    println("Done! Shapefile data successfully processed!")
+    println("Done!")
 
     spark.stop()
   }
