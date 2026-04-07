@@ -196,6 +196,55 @@ assemblyMergeStrategy in assembly := {
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.1")
 ```
 
+### How to ingest GISParquet ? 
+GISParquet is natively supported by Spark, so it is the simplest out of the examples of GIS data types im going to show. 
+In this test case im going to try to convert one of my file column called (polygon_suburbs) that was stored as raw binary as parquet to hex.
+
+By using hex() to convert binary , the hex string will become readable when saved back to Parquet.
+In this scenarios i will only demonstrate a binary conversion jon , no coordinate parsing or CRS transformation to highlight that DLI can in fact support you in processing you GIS type data. 
+
+Please find the code template below : 
+```scala
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+
+object GISParquetIngestion {
+  def main(args: Array[String]): Unit = {
+
+    val spark = SparkSession.builder()
+      .appName("GIS Parquet Ingestion")
+      .getOrCreate()
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    val inputPath  = "obs://your-bucket/data_source/master_area_adm"
+    val outputPath = "obs://your-bucket/cleaned_tables/master_area_adm_processed"
+    val geometryCol = "polygon_suburb"   // ← change to your geometry column name
+
+    // ── Step 1: Read GIS Parquet from OBS ────────────────────────────────────
+    println("Step 1: Reading GIS Parquet from OBS...")
+    val df = spark.read.parquet(inputPath)
+    println("Step 1 complete!")
+
+    // ── Step 2: Convert binary geometry column to hex string ──────────────────
+    println("Step 2: Converting binary geometry to hex string...")
+    val dfConverted = df.withColumn(
+      geometryCol,
+      hex(col(geometryCol))
+    )
+    println("Step 2 complete!")
+
+    // ── Step 3: Save back to OBS as Parquet ───────────────────────────────────
+    println("Step 3: Saving to OBS...")
+    dfConverted.write
+      .mode("overwrite")
+      .parquet(outputPath)
+    println("Done! GIS Parquet data successfully processed!")
+
+    spark.stop()
+  }
+}
+```
+
 ### `GISIngestion.scala`
 
 ```scala
@@ -231,9 +280,81 @@ object GISIngestion {
 ```
 
 ### How to ingest GeoJSON ? 
+GEOJson can include large single files, so in here we will use the wholeTextFiles() to read the entire file as one string per file. This method is good for small to medium files. This method uses json4 (paired with spark) to manually parse the GeoJSON features into array, since GeoJSON isn't a flat table each feature has nested geometry and properties objects.
+
+We are also using Sedona's ST_GeomFromGeoJSON to parse the geometry JSON string into a proper geometry object.
+The output will be Outputs both WKT (human readable) and hex/WKB (binary, compact) representations in this case. But you can try any processing later on in the future.
+
+Please find the sample code below for the scenarios i just mentioned : 
 
 ```scala for GeoJSON
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions._
+import org.apache.sedona.spark.SedonaContext
 
+object GeoJSONIngestion {
+  def main(args: Array[String]): Unit = {
+
+    val spark = SparkSession.builder()
+      .appName("GeoJSON Sedona Ingestion")
+      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
+      .getOrCreate()
+
+    SedonaContext.create(spark)
+
+    // ── Config ────────────────────────────────────────────────────────────────
+    val inputPath  = "obs://your-bucket/data_source/GeoJSON/your-file.json"
+    val outputPath = "obs://your-bucket/cleaned_tables/your-output"
+
+    // ── Step 1: Read entire GeoJSON file as raw text ──────────────────────────
+    println("Step 1: Reading GeoJSON from OBS...")
+    val rawJson = spark.sparkContext
+      .wholeTextFiles(inputPath)
+      .values
+      .first()
+    println("Step 1 complete!")
+
+    // ── Step 2: Parse features (geometry + properties) ────────────────────────
+    println("Step 2: Parsing GeoJSON features...")
+    import org.json4s._
+    import org.json4s.jackson.JsonMethods._
+    implicit val formats: DefaultFormats.type = DefaultFormats
+
+    val parsed   = parse(rawJson)
+    val features = (parsed \ "features").children
+
+    val rows: Seq[(String, String)] = features.map { f =>
+      val geomStr = compact(render(f \ "geometry"))
+      val propStr = compact(render(f \ "properties"))
+      (geomStr, propStr)
+    }
+
+    import spark.implicits._
+    val featuresDf = spark.createDataset(rows).toDF("geometry_json", "properties")
+    featuresDf.count()
+    println("Step 2 complete!")
+
+    // ── Step 3: Parse geometry with Sedona ───────────────────────────────────
+    println("Step 3: Parsing geometry with Sedona...")
+    val dfWithGeom = featuresDf
+      .withColumn("geometry",     expr("ST_GeomFromGeoJSON(geometry_json)"))
+      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))      // human-readable
+      .withColumn("geometry_hex", expr("ST_AsBinary(geometry)"))    // binary/compact
+      .drop("geometry", "geometry_json")
+    dfWithGeom.count()
+    println("Step 3 complete!")
+
+    // ── Step 4: Save to OBS as Parquet ────────────────────────────────────────
+    println("Step 4: Saving to OBS...")
+    dfWithGeom.write
+      .mode("overwrite")
+      .parquet(outputPath)
+    println("Done! GeoJSON data successfully processed!")
+
+    spark.stop()
+  }
+}
 ```
 
 ### GIS-Ingestion GeoJSON
