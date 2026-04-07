@@ -1,46 +1,48 @@
 # 🗺️ GIS Data Ingestion on Huawei Cloud DLI
 
-> Ingesting and processing GIS (Geographic Information System) data stored in OBS (Object Storage Service) using Huawei Cloud Data Lake Insight (DLI) with Apache Spark and Apache Sedona.
+> A step-by-step guide to ingesting and processing GIS data from OBS using Huawei Cloud Data Lake Insight (DLI) with Apache Spark and Apache Sedona.
 
 ---
 
 ## 📋 Table of Contents
-
 - [Overview](#overview)
-- [Architecture](#architecture)
+- [Why Scala JAR?](#why-scala-jar)
 - [Technology Stack](#technology-stack)
 - [Prerequisites](#prerequisites)
 - [Project Structure](#project-structure)
 - [Setup & Build](#setup--build)
+- [GIS Format Guides](#gis-format-guides)
+  - [GIS Parquet](#1--gis-parquet-simplest)
+  - [GeoJSON](#2--geojson)
+  - [Shapefile](#3--shapefile)
 - [DLI Job Configuration](#dli-job-configuration)
-- [Known Limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
+- [Known Limitations](#known-limitations)
 - [Pending](#pending)
 
 ---
 
 ## Overview
 
-This project demonstrates how to ingest GIS data (stored as Parquet files with binary geometry columns) from Huawei OBS into Huawei DLI for processing. The geometry column is converted from binary to hex string format for compatibility with Spark's data processing pipeline.
+This project shows how to ingest GIS data stored in Huawei OBS into Huawei DLI for processing using Apache Spark and Apache Sedona.
 
 ### What This Does
-- ✅ Reads GIS Parquet files from OBS
-- ✅ Processes geometry columns (binary → hex string conversion)
-- ✅ Saves processed data back to OBS as Parquet
-- ⏳ Save to DLI Hive table (pending Huawei metastore URI — see [Pending](#pending))
+| Status | Feature |
+|---|---|
+| ✅ | Reads GIS files (Parquet, GeoJSON, Shapefile) from OBS |
+| ✅ | Processes geometry columns |
+| ✅ | Saves processed data back to OBS |
+| ⏳ | Save directly to DLI Hive table *(pending Huawei support — see [Pending](#pending))* |
 
----
-
-## Architecture
-
+### Architecture
 ```
 OBS Bucket (Raw GIS Data)
         │
         ▼
-DLI Spark Job (JAR)
-  ├── Read Parquet from OBS
-  ├── Convert binary geometry → hex string
-  └── Write processed Parquet back to OBS
+DLI Spark Job (Scala JAR)
+  ├── Read GIS file from OBS
+  ├── Process geometry column
+  └── Write processed data back to OBS
         │
         ▼
 OBS Bucket (Processed GIS Data)
@@ -48,56 +50,52 @@ OBS Bucket (Processed GIS Data)
 
 ---
 
+## Why Scala JAR?
+
+If you're wondering why this uses a Scala JAR instead of a simpler Python script — it's a DLI platform limitation:
+
+```
+❌ Python (PySpark) approach:
+   DLI Python runtime = 3.7
+   Sedona requires    = 3.8+
+   Result             = ImportError
+
+✅ Scala JAR approach:
+   Runs on JVM (Java 8)
+   No Python dependency
+   Result             = Works!
+```
+
+---
+
 ## Technology Stack
 
-| Component | Version | Reason |
+| Component | Version | Why This Version |
 |---|---|---|
-| **DLI Spark** | 3.3.1 | Huawei Cloud DLI's Spark engine version |
-| **Java** | 8 (JRE 8) | DLI runtime only supports up to Java 8 (`class file version 52.0`) |
+| **DLI Spark** | 3.3.1 | Huawei Cloud DLI's Spark engine |
+| **Java** | 8 (JRE 8) | DLI runtime only supports up to Java 8 |
 | **Scala** | 2.12.15 | Compatible with Spark 3.3.1 |
-| **Apache Sedona** | 1.5.1 | Latest version supporting Spark 3.3 + Java 8 (Sedona 1.8.0+ dropped both) |
-| **GeoTools** | 1.5.1-28.2 | Sedona dependency for geometry processing (must match Sedona version) |
-| **sbt** | 1.12.5 | Scala build tool to compile code into JAR |
+| **Apache Sedona** | 1.5.1 | Latest version supporting Spark 3.3 + Java 8 |
+| **GeoTools** | 1.5.1-28.2 | Required Sedona dependency — must match Sedona version |
+| **sbt** | 1.12.5 | Scala build tool |
 
-### Why Scala JAR Instead of Python Script?
-
-DLI's Python runtime is **Python 3.7**, but Apache Sedona requires **Python 3.8+**. This causes an `ImportError` when using PySpark. The solution is to use a **Scala JAR** which runs on the JVM and bypasses the Python version limitation entirely.
-
-```
-Python approach (failed):
-  DLI Python runtime = 3.7
-  Sedona requires    = 3.8+
-  Result             = ImportError ❌
-
-Scala JAR approach (working):
-  Runs on JVM (Java 8)
-  No Python dependency
-  Result             = Works ✅
-```
-
-### Why Sedona 1.5.1 Instead of Latest?
-
-Sedona 1.8.0 dropped support for Spark 3.3 and Java 8. DLI's Spark version is 3.3.1 and its JRE is Java 8. Therefore, Sedona 1.5.1 is the latest compatible version.
-
-| Sedona Version | Spark 3.3 Support | Java 8 Support |
-|---|---|---|
-| 1.8.x | ❌ | ❌ |
-| 1.7.x | ✅ | ✅ |
-| **1.5.1** | ✅ | ✅ |
+> ⚠️ **Why not the latest Sedona?** Sedona 1.6.0+ dropped support for Spark 3.3 and Java 8. Sedona 1.5.1 is the newest version that works on DLI.
 
 ---
 
 ## Prerequisites
 
-1. Huawei Cloud account with DLI and OBS services enabled
-2. GIS data uploaded to OBS bucket as Parquet files
-3. DLI agency with access to OBS bucket
-4. Local machine with:
-   - Java 17 (for building — compile target is Java 8)
+Before you start, make sure you have:
+
+1. A Huawei Cloud account with **DLI** and **OBS** services enabled
+2. GIS data uploaded to your OBS bucket
+3. A DLI agency with access to your OBS bucket
+4. On your local machine:
+   - Java 17 *(for building — the compile target is Java 8)*
    - sbt 1.12.5+
-5. The following JARs downloaded and uploaded to OBS:
-   - `sedona-spark-shaded-3.0_2.12-1.5.1.jar` — [Download from Maven](https://mvnrepository.com/artifact/org.apache.sedona/sedona-spark-shaded-3.0_2.12/1.5.1)
-   - `geotools-wrapper-1.5.1-28.2.jar` — [Download from Maven](https://mvnrepository.com/artifact/org.datasyslab/geotools-wrapper/1.5.1-28.2)
+5. These JARs downloaded and uploaded to OBS:
+   - [`sedona-spark-shaded-3.0_2.12-1.5.1.jar`](https://mvnrepository.com/artifact/org.apache.sedona/sedona-spark-shaded-3.0_2.12/1.5.1)
+   - [`geotools-wrapper-1.5.1-28.2.jar`](https://mvnrepository.com/artifact/org.datasyslab/geotools-wrapper/1.5.1-28.2)
 
 ---
 
@@ -105,31 +103,26 @@ Sedona 1.8.0 dropped support for Spark 3.3 and Java 8. DLI's Spark version is 3.
 
 ```
 gis-ingestion/
-├── build.sbt                          # sbt build configuration
+├── build.sbt                     # Build configuration
 ├── project/
-│   └── plugins.sbt                    # sbt assembly plugin
+│   └── plugins.sbt               # sbt assembly plugin
 └── src/
     └── main/
         └── scala/
-            └── GISIngestion.scala     # Main Spark job
+            ├── GISParquetIngestion.scala
+            ├── GeoJSONIngestion.scala
+            └── ShapefileIngestion.scala
 ```
 
 ---
 
 ## Setup & Build
 
-### Step 1 — Clone and configure
-
-Update the OBS paths in `GISIngestion.scala` to match your bucket:
+### Step 1 — Update OBS paths in your `.scala` file
 
 ```scala
-// Input path
-val df = config.read.parquet("obs://YOUR-BUCKET/YOUR-PATH/YOUR-FILE")
-
-// Output path
-dfConverted.write
-  .mode("overwrite")
-  .parquet("obs://YOUR-BUCKET/YOUR-PATH/YOUR-FILE-processed")
+val inputPath  = "obs://YOUR-BUCKET/YOUR-INPUT-PATH"
+val outputPath = "obs://YOUR-BUCKET/YOUR-OUTPUT-PATH"
 ```
 
 ### Step 2 — Set Java 17 for building
@@ -148,7 +141,7 @@ cd gis-ingestion
 sbt assembly
 ```
 
-Output JAR location:
+Output JAR:
 ```
 target/scala-2.12/gis-ingestion-assembly-1.0.jar
 ```
@@ -157,15 +150,12 @@ target/scala-2.12/gis-ingestion-assembly-1.0.jar
 
 Upload the JAR to your OBS bucket:
 ```
-obs://YOUR-BUCKET/jobs/jar/gis-ingestion-assembly-1.0.jar
+obs://YOUR-BUCKET/GIS_driver/GIS_JAR/gis-ingestion-assembly-1.0.jar
 ```
 
----
-
-## Source Code
-
 ### `build.sbt`
-```build
+
+```scala
 name := "gis-ingestion"
 version := "1.0"
 scalaVersion := "2.12.15"
@@ -179,14 +169,15 @@ resolvers ++= Seq(
 )
 
 libraryDependencies ++= Seq(
-  "org.apache.spark" %% "spark-sql" % "3.3.1" % "provided",
-  "org.apache.spark" %% "spark-hive" % "3.3.1" % "provided",
-  "org.apache.sedona" %% "sedona-spark-shaded-3.0" % "1.5.1"
+  "org.apache.spark"  %% "spark-sql"                % "3.3.1" % "provided",
+  "org.apache.spark"  %% "spark-hive"               % "3.3.1" % "provided",
+  "org.apache.sedona" %% "sedona-spark-shaded-3.0"  % "1.5.1"
 )
 
 assemblyMergeStrategy in assembly := {
-  case PathList("META-INF", xs @ _*) => MergeStrategy.discard
-  case x => MergeStrategy.first
+  case PathList("META-INF", "services", _*) => MergeStrategy.concat
+  case PathList("META-INF", _*)             => MergeStrategy.discard
+  case _                                    => MergeStrategy.first
 }
 ```
 
@@ -196,14 +187,22 @@ assemblyMergeStrategy in assembly := {
 addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.1")
 ```
 
-### How to ingest GISParquet ? 
-GISParquet is natively supported by Spark, so it is the simplest out of the examples of GIS data types im going to show. 
-In this test case im going to try to convert one of my file column called (polygon_suburbs) that was stored as raw binary as parquet to hex.
+---
 
-By using hex() to convert binary , the hex string will become readable when saved back to Parquet.
-In this scenarios i will only demonstrate a binary conversion jon , no coordinate parsing or CRS transformation to highlight that DLI can in fact support you in processing you GIS type data. 
+## GIS Format Guides
 
-Please find the code template below : 
+There are three supported GIS formats, ordered from simplest to most complex.
+
+---
+
+### 1. 📦 GIS Parquet (Simplest)
+
+Parquet is natively supported by Spark.
+
+In this example, a geometry column (`polygon_suburb`) is stored as raw binary. We convert it to a hex string so it becomes readable when saved back to Parquet. This is a binary conversion job only — no coordinate parsing or CRS transformation.
+
+#### Code Template
+
 ```scala
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
@@ -216,9 +215,9 @@ object GISParquetIngestion {
       .getOrCreate()
 
     // ── Config ────────────────────────────────────────────────────────────────
-    val inputPath  = "obs://your-bucket/data_source/master_area_adm"
-    val outputPath = "obs://your-bucket/cleaned_tables/master_area_adm_processed"
-    val geometryCol = "polygon_suburb"   // ← change to your geometry column name
+    val inputPath   = "obs://your-bucket/data_source/master_area_adm"
+    val outputPath  = "obs://your-bucket/cleaned_tables/master_area_adm_processed"
+    val geometryCol = "polygon_suburb"  // ← change to your geometry column name
 
     // ── Step 1: Read GIS Parquet from OBS ────────────────────────────────────
     println("Step 1: Reading GIS Parquet from OBS...")
@@ -227,10 +226,7 @@ object GISParquetIngestion {
 
     // ── Step 2: Convert binary geometry column to hex string ──────────────────
     println("Step 2: Converting binary geometry to hex string...")
-    val dfConverted = df.withColumn(
-      geometryCol,
-      hex(col(geometryCol))
-    )
+    val dfConverted = df.withColumn(geometryCol, hex(col(geometryCol)))
     println("Step 2 complete!")
 
     // ── Step 3: Save back to OBS as Parquet ───────────────────────────────────
@@ -245,49 +241,17 @@ object GISParquetIngestion {
 }
 ```
 
-### `GISIngestion.scala`
+---
+
+### 2. 🌍 GeoJSON
+
+**Requires Sedona.** GeoJSON files can be large single files, so we use `wholeTextFiles()` to read the entire file as one string. We then use **json4s** (bundled with Spark) to manually parse the `features` array — because GeoJSON is not a flat table, each feature contains nested `geometry` and `properties` objects.
+
+Sedona's `ST_GeomFromGeoJSON` parses the geometry into a proper geometry object, and we output both WKT (human-readable) and hex/WKB (binary, compact) formats.
+
+#### Code Template
 
 ```scala
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
-
-object GISIngestion {
-  def main(args: Array[String]): Unit = {
-    val config = SparkSession.builder()
-      .appName("GIS Sedona Ingestion")
-      .getOrCreate()
-
-    println("Step 1: Reading GIS parquet from OBS...")
-    val df = config.read.parquet("obs://dashboard-env-bucket/master_area_adm")
-    println("Step 1 complete!")
-
-    println("Step 2: Converting binary geometry to hex string...")
-    val dfConverted = df.withColumn(
-      "polygon_suburb",
-      hex(col("polygon_suburb"))
-    )
-    println("Step 2 complete!")
-
-    println("Step 3: Saving to OBS...")
-    dfConverted.write
-      .mode("overwrite")
-      .parquet("obs://denodo-bucket-telkom/cleaned_tables/master_area_adm_processed")
-
-    println("Done! GIS data successfully processed!")
-    config.stop()
-  }
-}
-```
-
-### How to ingest GeoJSON ? 
-GEOJson can include large single files, so in here we will use the wholeTextFiles() to read the entire file as one string per file. This method is good for small to medium files. This method uses json4 (paired with spark) to manually parse the GeoJSON features into array, since GeoJSON isn't a flat table each feature has nested geometry and properties objects.
-
-We are also using Sedona's ST_GeomFromGeoJSON to parse the geometry JSON string into a proper geometry object.
-The output will be Outputs both WKT (human readable) and hex/WKB (binary, compact) representations in this case. But you can try any processing later on in the future.
-
-Please find the sample code below for the scenarios i just mentioned : 
-
-```scala for GeoJSON
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.sedona.spark.SedonaContext
@@ -335,12 +299,12 @@ object GeoJSONIngestion {
     featuresDf.count()
     println("Step 2 complete!")
 
-    // ── Step 3: Parse geometry with Sedona ───────────────────────────────────
+    // ── Step 3: Parse geometry with Sedona ────────────────────────────────────
     println("Step 3: Parsing geometry with Sedona...")
     val dfWithGeom = featuresDf
       .withColumn("geometry",     expr("ST_GeomFromGeoJSON(geometry_json)"))
-      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))      // human-readable
-      .withColumn("geometry_hex", expr("ST_AsBinary(geometry)"))    // binary/compact
+      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))    // human-readable
+      .withColumn("geometry_hex", expr("ST_AsBinary(geometry)"))  // binary/compact
       .drop("geometry", "geometry_json")
     dfWithGeom.count()
     println("Step 3 complete!")
@@ -357,89 +321,25 @@ object GeoJSONIngestion {
 }
 ```
 
-### GIS-Ingestion GeoJSON
-```scala for GeoJSON
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
-import org.apache.sedona.spark.SedonaContext
+---
 
-object GISIngestion {
-  def main(args: Array[String]): Unit = {
+### 3. 🗺️ Shapefile
 
-    val spark = SparkSession.builder()
-      .appName("GIS Sedona Ingestion")
-      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
-      .getOrCreate()
+**Requires Sedona.** A shapefile is always made up of three files that must share the same base filename:
 
-    SedonaContext.create(spark)
+| File | Contents |
+|---|---|
+| `.shp` | Geometry features |
+| `.shx` | Geometry index |
+| `.dbf` | Attribute data (columns) |
 
-    val inputPath  = "obs://denodo-bucket-telkom/data_source/GeoJSON/sample.json"
-    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables"
+> ⚠️ Unlike GeoJSON, Shapefile **cannot** use `spark.read.format("shapefile")` in DLI — the DataSource registration doesn't work correctly. Instead, we use Sedona's **RDD API** (`ShapefileReader`) which reads the folder directly and auto-joins all three files.
 
-    // ── Step 1: Read entire GeoJSON file as a single raw text string ──────────
-    println("Step 1: Reading GeoJSON from OBS...")
-    val rawJson = spark.sparkContext
-      .wholeTextFiles(inputPath)
-      .values
-      .first()
+Point the `inputPath` to the **folder**, not an individual file. Sedona will auto-discover and join `.shp`, `.dbf`, and `.shx` automatically.
 
-    // ── Step 2: Parse features manually using org.json (available in Spark) ───
-    println("Step 2: Parsing features...")
-    import org.json4s._
-    import org.json4s.jackson.JsonMethods._
-    implicit val formats: DefaultFormats.type = DefaultFormats
+#### Code Template
 
-    val parsed     = parse(rawJson)
-    val features   = (parsed \ "features").children
-
-    // Extract geometry JSON string and properties JSON string per feature
-    val rows: Seq[(String, String)] = features.map { f =>
-      val geomStr  = compact(render(f \ "geometry"))
-      val propStr  = compact(render(f \ "properties"))
-      (geomStr, propStr)
-    }
-
-    import spark.implicits._
-    val featuresDf = spark.createDataset(rows).toDF("geometry_json", "properties")
-    featuresDf.count()
-    println("Step 2 complete!")
-
-    // ── Step 3: Parse geometry with Sedona ───────────────────────────────────
-    println("Step 3: Parsing geometry with Sedona...")
-    val dfWithGeom = featuresDf
-      .withColumn("geometry",     expr("ST_GeomFromGeoJSON(geometry_json)"))
-      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
-      .withColumn("geometry_hex", expr("ST_AsBinary(geometry)"))
-      .drop("geometry", "geometry_json")
-    dfWithGeom.count()
-    println("Step 3 complete!")
-
-    // ── Step 4: Save to OBS ──────────────────────────────────────────────────
-    println("Step 4: Saving to OBS...")
-    dfWithGeom
-      .write
-      .mode("overwrite")
-      .parquet(outputPath)
-    println("Done! GIS data successfully processed!")
-
-    spark.stop()
-  }
-}
-```
-### How to ingest Shapefile ? 
-Prerequisites : A functional shapefile data will need to include minimum of these three files before you proceed, please do note that they all need to have the same filename with different extensions.
-a. feature geometry (.shp) : The data where you store your actual geometry features
-b. Index file (.shx) : Stores index of the feature geometry
-c. Attribute data (.dbf) : Stores feature attributes in a tabular format (dBASE)
-
-The template below will leverage on Apache sedona to read the Shapefile folder specifically we will rely on Sedona's RDD API (ShapefileReader). Sedona will auto-discover these files and sedona will automatically join these three. 
-
-The purpose of the code below is one of the example how we can do some data processing for Shapefile from the WKT format to a more readible format - for example here i put the file as CSV.
-
-Please find the code template below : 
-```scala for Shapefile template
+```scala
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.sedona.spark.SedonaContext
@@ -458,7 +358,7 @@ object ShapefileIngestion {
     SedonaContext.create(spark)
 
     // ── Config ────────────────────────────────────────────────────────────────
-    val inputPath  = "obs://your-bucket/data_source/Shapefile"   // folder path
+    val inputPath  = "obs://your-bucket/data_source/Shapefile"  // ← folder, not a file
     val outputPath = "obs://your-bucket/cleaned_tables/Shapefile"
 
     // ── Step 1: Read Shapefile folder (auto-joins .shp, .dbf, .shx) ──────────
@@ -489,103 +389,30 @@ object ShapefileIngestion {
 }
 ```
 
-### GIS-Ingestion Shapefile code example
-```scala for Shapefile (.shp)
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions._
-import org.apache.sedona.spark.SedonaContext
-import org.apache.sedona.core.formatMapper.shapefileParser.ShapefileReader
-import org.apache.sedona.sql.utils.Adapter
-
-object ShapefileIngestion {
-  def main(args: Array[String]): Unit = {
-    val spark = SparkSession.builder()
-      .appName("Shapefile Sedona Ingestion")
-      .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-      .config("spark.kryo.registrator", "org.apache.sedona.core.serde.SedonaKryoRegistrator")
-      .getOrCreate()
-
-    SedonaContext.create(spark)
-
-    val inputPath  = "obs://denodo-bucket-telkom/data_source/Shapefile"
-    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables/Shapefile"
-
-    // Step 1: Read Shapefile using RDD API (no DataSource registration needed)
-    println("Step 1: Reading Shapefile from OBS...")
-    val spatialRDD = ShapefileReader.readToGeometryRDD(
-      spark.sparkContext,
-      inputPath
-    )
-    val shapefileDf = Adapter.toDf(spatialRDD, spark)
-    shapefileDf.count()
-    println("Step 1 complete!")
-
-    // Step 2: Convert geometry to WKT
-    println("Step 2: Converting geometry to WKT...")
-    val dfWithWkt = shapefileDf
-      .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
-      .drop("geometry")
-    dfWithWkt.count()
-    println("Step 2 complete!")
-
-    // Step 3: Save as CSV
-    println("Step 3: Saving to OBS as CSV...")
-    dfWithWkt
-      .write
-      .mode("overwrite")
-      .option("header", "true")
-      .csv(outputPath)
-    println("Done!")
-
-    spark.stop()
-  }
-}
-```
-
 ---
 
 ## DLI Job Configuration
 
 | Field | Value |
 |---|---|
-| **Job Name** | `gis_ingestion` |
-| **Application** | `obs://YOUR-BUCKET/jobs/jar/gis-ingestion-assembly-1.0.jar` |
-| **Main Class** | `GISIngestion` |
+| **Job Name** | `gis-ingestion` |
+| **Spark Version** | `3.3.1` |
+| **Application** | `obs://YOUR-BUCKET/GIS_driver/GIS_JAR/gis-ingestion-assembly-1.0.jar` |
+| **Main Class** | `GISParquetIngestion` / `GeoJSONIngestion` / `ShapefileIngestion` |
 | **Agency** | Your DLI agency with OBS access |
 | **Job Type** | Basic |
-| **JAR Dependencies** | `obs://YOUR-BUCKET/jobs/sedona/sedona-spark-shaded-3.0_2.12-1.5.1.jar` |
-| | `obs://YOUR-BUCKET/jobs/geotools-wrapper/geotools-wrapper-1.5.1-28.2.jar` |
-| **Python Dependencies** | None |
-
-Please find an example of my job configuration below !
-<img width="787" height="755" alt="image" src="https://github.com/user-attachments/assets/b6a578bf-6ccc-4f1b-88be-8fa60842faed" />
-
+| **JAR Dependencies** | `obs://YOUR-BUCKET/GIS_driver/Apache_Sedona/sedona-spark-shaded-3.0_2.12-1.5.1.jar` |
+| | `obs://YOUR-BUCKET/GIS_driver/Apache_Sedona/geotools-wrapper-1.5.1-28.2.jar` |
 
 ### Spark Arguments (`--conf`)
 
 ```
-spark.kubernetes.submission.waitAppCompletion=true
-spark.driver.memory=1g
-spark.executor.memory=1g
+spark.driver.memory=2g
+spark.executor.memory=2g
+spark.executor.memoryOverhead=512m
 spark.executor.instances=1
+spark.executor.cores=2
 ```
-
----
-
-## Known Limitations
-
-### 1. Cannot Save Directly to DLI Hive Table
-Spark JAR jobs in DLI cannot connect to DLI's Hive metastore directly. The job attempts to use a local Derby database which fails with:
-```
-Accessing DLI metadata from a Spark JAR job is a restricted feature that requires explicit activation by Huawei, so you need to submit a ticket to whitelist it first
-```
-**Workaround:** Save processed data back to OBS as Parquet instead.
-
-### 2. Geometry Column Stored as Binary
-The `polygon_suburb` geometry column is stored as `binary` type in the Parquet file. DLI's Hive tables do not support binary types directly, so the column is converted to a hex string representation for storage compatibility.
-
-### 3. Python Runtime Version
-DLI's Python runtime is 3.7. Apache Sedona 1.5.1+ requires Python 3.8+. Therefore PySpark cannot be used with Sedona in DLI — Scala JAR is required.
 
 ---
 
@@ -593,22 +420,42 @@ DLI's Python runtime is 3.7. Apache Sedona 1.5.1+ requires Python 3.8+. Therefor
 
 | Error | Cause | Fix |
 |---|---|---|
-| `ImportError: cannot import name 'Literal'` | DLI Python 3.7 too old for Sedona | Use Scala JAR instead of PySpark |
+| `Failed to find data source: shapefile` | Spark DataSource registration fails for shapefile format | Use `ShapefileReader` RDD API instead of `spark.read.format("shapefile")` |
+| `ImportError: cannot import name 'Literal'` | DLI Python 3.7 is too old for Sedona | Use Scala JAR instead of PySpark |
 | `UnsupportedClassVersionError: class file version 55.0` | JAR compiled for Java 11, DLI needs Java 8 | Add `-target:jvm-1.8` to `build.sbt` |
-| `Table/View 'DBS' does not exist` | DLI JAR job cannot access Hive metastore | Save to OBS instead of DLI table |
-| `Error downloading edu.ucar:cdm-core` | Missing UCAR repository | Add UCAR resolver to `build.sbt` |
-| `sbt: command not found` | sbt not installed or not in PATH | Restart terminal after installing sbt |
+| `Table/View 'DBS' does not exist` | DLI JAR jobs cannot access Hive metastore by default | Save to OBS instead; see [Pending](#pending) |
+| `Error downloading edu.ucar:cdm-core` | Missing UCAR repository in build config | Add UCAR resolver to `build.sbt` |
+| `ClassNotFoundException: shapefile.DefaultSource` | Wrong Sedona JAR version for your Spark version | Use `sedona-spark-shaded-3.0_2.12-1.5.1.jar` for Spark 3.3 |
+
+---
+
+## Known Limitations
+
+### 1. Cannot Save Directly to DLI Hive Table
+Spark JAR jobs in DLI cannot connect to DLI's Hive metastore directly without explicit activation by Huawei:
+```
+Accessing DLI metadata from a Spark JAR job is a restricted feature
+that requires explicit activation by Huawei — submit a support ticket to whitelist it.
+```
+**Workaround:** Save processed data back to OBS as Parquet instead.
+
+### 2. Geometry Column Stored as Binary
+The geometry column is stored as `binary` type in Parquet files. DLI Hive tables do not support binary types directly, so it must be converted to a hex string for storage compatibility.
+
+### 3. Python Runtime Version
+DLI's Python runtime is 3.7. Apache Sedona 1.5.1+ requires Python 3.8+. PySpark cannot be used with Sedona in DLI — a Scala JAR is required.
 
 ---
 
 ## Pending
 
 ### Save to DLI Hive Table
-Once Huawei Cloud Support provides the correct Hive metastore URI for DLI JAR jobs, the code will be updated to save directly to a DLI table:
+
+Once Huawei Cloud Support provides the correct Hive metastore URI, the code will be updated to save directly to a DLI table:
 
 ```scala
 // Pending Huawei support ticket response
-val config = SparkSession.builder()
+val spark = SparkSession.builder()
   .appName("GIS Sedona Ingestion")
   .config("hive.metastore.uris", "thrift://HUAWEI_PROVIDED_URI")
   .config("spark.sql.warehouse.dir", "luxorfs://hacluster/spark/managedDb")
@@ -621,24 +468,23 @@ dfConverted.write
   .insertInto("poc.master_area_adm")
 ```
 
-The DLI table schema (pre-created via DLI SQL Editor):
+Pre-create the DLI table via the SQL Editor:
+
 ```sql
 CREATE TABLE IF NOT EXISTS poc.master_area_adm (
-  suburb STRING,
-  district STRING,
-  city STRING,
-  province STRING,
-  polygon_suburb STRING,
-  taxi_operation_city BOOLEAN
+  suburb               STRING,
+  district             STRING,
+  city                 STRING,
+  province             STRING,
+  polygon_suburb       STRING,
+  taxi_operation_city  BOOLEAN
 )
 STORED AS PARQUET;
 ```
 
 ---
 
-## Data Schema
-
-The input GIS Parquet file contains the following columns:
+## Data Schema (GIS Parquet Example)
 
 | Column | Type | Description |
 |---|---|---|
@@ -646,11 +492,11 @@ The input GIS Parquet file contains the following columns:
 | `district` | STRING | District name |
 | `city` | STRING | City name |
 | `province` | STRING | Province name |
-| `polygon_suburb` | BINARY | Geometry polygon data (WKB format) |
+| `polygon_suburb` | BINARY | Geometry polygon in WKB format |
 | `taxi_operation_city` | BOOLEAN | Whether taxi operates in this city |
 
 **Total rows:** 77,474
 
 ---
 
-*Last updated: March 2026*
+*Last updated: April 2026*
