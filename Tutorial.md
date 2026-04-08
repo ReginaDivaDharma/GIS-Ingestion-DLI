@@ -349,7 +349,6 @@ import org.apache.sedona.sql.utils.Adapter
 
 object ShapefileIngestion {
   def main(args: Array[String]): Unit = {
-
     val spark = SparkSession.builder()
       .appName("Shapefile Sedona Ingestion")
       .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
@@ -358,18 +357,20 @@ object ShapefileIngestion {
 
     SedonaContext.create(spark)
 
-    // ── Config ────────────────────────────────────────────────────────────────
-    val inputPath  = "obs://your-bucket/data_source/Shapefile"  // ← folder, not a file
-    val outputPath = "obs://your-bucket/cleaned_tables/Shapefile"
+    val inputPath  = "obs://denodo-bucket-telkom/data_source/Shapefile"
+    val outputPath = "obs://denodo-bucket-telkom/cleaned_tables/Shapefile"
 
-    // ── Step 1: Read Shapefile folder (auto-joins .shp, .dbf, .shx) ──────────
+    // Step 1: Read Shapefile using RDD API (no DataSource registration needed)
     println("Step 1: Reading Shapefile from OBS...")
-    val spatialRDD  = ShapefileReader.readToGeometryRDD(spark.sparkContext, inputPath)
+    val spatialRDD = ShapefileReader.readToGeometryRDD(
+      spark.sparkContext,
+      inputPath
+    )
     val shapefileDf = Adapter.toDf(spatialRDD, spark)
     shapefileDf.count()
     println("Step 1 complete!")
 
-    // ── Step 2: Convert geometry to WKT ──────────────────────────────────────
+    // Step 2: Convert geometry to WKT
     println("Step 2: Converting geometry to WKT...")
     val dfWithWkt = shapefileDf
       .withColumn("geometry_wkt", expr("ST_AsText(geometry)"))
@@ -377,13 +378,14 @@ object ShapefileIngestion {
     dfWithWkt.count()
     println("Step 2 complete!")
 
-    // ── Step 3: Save as CSV ───────────────────────────────────────────────────
+    // Step 3: Save as CSV
     println("Step 3: Saving to OBS as CSV...")
-    dfWithWkt.write
+    dfWithWkt
+      .write
       .mode("overwrite")
       .option("header", "true")
       .csv(outputPath)
-    println("Done! Shapefile data successfully processed!")
+    println("Done!")
 
     spark.stop()
   }
