@@ -17,8 +17,6 @@
   - [Shapefile](#3--shapefile)
 - [DLI Job Configuration](#dli-job-configuration)
 - [Troubleshooting](#troubleshooting)
-- [Known Limitations](#known-limitations)
-- [Pending](#pending)
 
 ---
 
